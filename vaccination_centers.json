@@ -1,0 +1,20 @@
+[
+  {
+    "id": 1,
+    "name": "Center A",
+    "address": "123 Main Street, Cairo",
+    "vaccines": [
+      "Pfizer",
+      "Moderna"
+    ]
+  },
+  {
+    "id": 2,
+    "name": "Center B",
+    "address": "456 Second Avenue, Alexandria",
+    "vaccines": [
+      "AstraZeneca",
+      "Johnson & Johnson"
+    ]
+  }
+]

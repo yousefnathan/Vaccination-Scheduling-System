@@ -1,0 +1,15 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.venv/
+env/
+venv/
+ENV/
+
+# Local databases / JSON files that store user data (optional - keeping them tracked if user wants, but typically ignored. Let's ignore new temp files)
+# users.json
+# reservations.json
+# vaccination_centers.json
