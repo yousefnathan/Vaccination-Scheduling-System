@@ -17,6 +17,8 @@
 
 The Vaccination Scheduling System is a console-based application developed in Python to streamline the management of vaccination centers and appointment reservations. The system supports secure user registration, authentication, reservation handling, and administrative operations through a simple command-line interface.
 
+This application represents my first university project, designed to establish a solid foundation in Python development and software engineering principles.
+
 The project demonstrates practical software engineering concepts including authentication, data validation, file persistence, CRUD operations, and secure password management.
 
 ---
