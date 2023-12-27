@@ -4,21 +4,30 @@ import re
 import random
 import datetime
 import hashlib
+import sys
+
+# Force UTF-8 encoding for standard output and error on Windows to prevent crash on unicode symbols
+if sys.platform.startswith('win'):
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 # ── Constants ────────────────────────────────────────────────────────────────
 USERS_FILE             = "users.json"
 CENTERS_FILE           = "vaccination_centers.json"
 RESERVATIONS_FILE      = "reservations.json"
-ADMIN_PASSWORD         = hashlib.sha256("admin123".encode()).hexdigest()
 MAX_LOGIN_ATTEMPTS     = 3
 
 
 # ── File helpers ──────────────────────────────────────────────────────────────
 def _load(filepath):
-    """Load a JSON file; return empty list if missing."""
-    if os.path.exists(filepath):
-        with open(filepath, "r") as f:
-            return json.load(f)
+    """Load a JSON file; return empty list if missing, empty, or invalid."""
+    if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+        try:
+            with open(filepath, "r") as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            return []
     return []
 
 def _save(filepath, data):
@@ -27,15 +36,30 @@ def _save(filepath, data):
         json.dump(data, f, indent=2)
 
 def init_data():
-    """Create default centers file if it doesn't exist yet."""
+    """Create default centers file and users if they don't exist yet."""
     if not os.path.exists(CENTERS_FILE):
         default_centers = [
             {"id": 1, "name": "Center A", "address": "123 Main Street, Cairo",      "vaccines": ["Pfizer", "Moderna"]},
             {"id": 2, "name": "Center B", "address": "456 Second Avenue, Alexandria","vaccines": ["AstraZeneca", "Johnson & Johnson"]}
         ]
         _save(CENTERS_FILE, default_centers)
-    if not os.path.exists(USERS_FILE):
-        _save(USERS_FILE, [])
+    
+    users = _load(USERS_FILE)
+    if not any(u.get("is_admin") for u in users):
+        admin_salt = os.urandom(16).hex()
+        admin_user = {
+            "id": 0,
+            "name": "Administrator",
+            "email": "admin@system.com",
+            "password": _hash("admin123", admin_salt),
+            "salt": admin_salt,
+            "phone": "0000000000",
+            "national_id": "0000000000",
+            "is_admin": True
+        }
+        users.append(admin_user)
+        _save(USERS_FILE, users)
+
     if not os.path.exists(RESERVATIONS_FILE):
         _save(RESERVATIONS_FILE, [])
 
@@ -75,8 +99,8 @@ def _confirm(prompt):
     """Ask a yes/no question; return True for 'y'."""
     return input(f"{prompt} (y/n): ").strip().lower() == "y"
 
-def _hash(password):
-    return hashlib.sha256(password.encode()).hexdigest()
+def _hash(password, salt=""):
+    return hashlib.sha256((password + salt).encode()).hexdigest()
 
 
 # ── Validators ────────────────────────────────────────────────────────────────
@@ -109,11 +133,13 @@ def register_user():
         return
 
     user_id = max((u["id"] for u in users), default=0) + 1
+    salt    = os.urandom(16).hex()
     users.append({
         "id":          user_id,
         "name":        name,
         "email":       email,
-        "password":    _hash(password),
+        "password":    _hash(password, salt),
+        "salt":        salt,
         "phone":       phone,
         "national_id": national_id,
     })
@@ -126,9 +152,13 @@ def login_admin():
     print("\n── Admin Login ───────────────────────────────")
     for attempt in range(1, MAX_LOGIN_ATTEMPTS + 1):
         password = input("Admin password: ")
-        if _hash(password) == ADMIN_PASSWORD:
-            print("Login successful.")
-            return True
+        users    = _load(USERS_FILE)
+        admin    = next((u for u in users if u.get("is_admin")), None)
+        if admin:
+            salt = admin.get("salt", "")
+            if admin["password"] == _hash(password, salt):
+                print("Login successful.")
+                return True
         print(f"Wrong password. ({attempt}/{MAX_LOGIN_ATTEMPTS})")
     print("Too many failed attempts.")
     return False
@@ -142,9 +172,12 @@ def login_user():
         password = input("Password: ")
         users    = _load(USERS_FILE)
         for user in users:
-            if user["email"] == email and user["password"] == _hash(password):
-                print(f"Welcome, {user['name']}!")
-                return user
+            # Check normal users, and support fallback for password hashing without salt
+            if not user.get("is_admin") and user["email"] == email:
+                salt = user.get("salt", "")
+                if user["password"] == _hash(password, salt):
+                    print(f"Welcome, {user['name']}!")
+                    return user
         print(f"Wrong email or password. ({attempt}/{MAX_LOGIN_ATTEMPTS})")
     print("Too many failed attempts.")
     return None
@@ -184,6 +217,13 @@ def add_or_remove_center():
         if not target:
             print("Center not found.")
             return
+        
+        # Check for existing reservations for this center
+        reservations = _load(RESERVATIONS_FILE)
+        if any(r["center_id"] == center_id for r in reservations):
+            print("Cannot remove center: Active reservations are linked to it.")
+            return
+
         if not _confirm(f"Remove '{target['name']}'?"):
             print("Cancelled.")
             return
@@ -197,19 +237,21 @@ def add_or_remove_center():
 
 
 def search_center_by_name():
-    """Search for a vaccination center by name (case-insensitive)."""
-    name    = input("Enter center name to search: ").strip().lower()
+    """Search for a vaccination center by name (case-insensitive substring match)."""
+    query   = input("Enter center name to search: ").strip().lower()
     centers = _load(CENTERS_FILE)
-    found   = [c for c in centers if c["name"].lower() == name]
+    found   = [c for c in centers if query in c["name"].lower()]
 
     if found:
-        c = found[0]
-        print(f"\nID:       {c['id']}")
-        print(f"Name:     {c['name']}")
-        print(f"Address:  {c['address']}")
-        print(f"Vaccines: {', '.join(c['vaccines'])}")
+        print(f"\nFound {len(found)} center(s):")
+        for c in found:
+            print(f"\nID:       {c['id']}")
+            print(f"Name:     {c['name']}")
+            print(f"Address:  {c['address']}")
+            print(f"Vaccines: {', '.join(c['vaccines'])}")
+            print("-" * 20)
     else:
-        print("No center found with that name.")
+        print("No center found matching that name.")
 
 
 def list_users_and_reservations():
@@ -241,7 +283,7 @@ def list_users_and_reservations():
 
 
 def accept_reservation():
-    """Auto-generate a vaccination date (10–30 days from today) for a user's reservation."""
+    """Assign a vaccination date (automatically or manually) for a user's reservation."""
     reservations = _load(RESERVATIONS_FILE)
     user_id      = _ask_int("Enter user ID: ")
 
@@ -254,8 +296,20 @@ def accept_reservation():
         print(f"This user already has an assigned date: {res['date']}")
         return
 
-    delta          = random.randint(10, 30)
-    assigned_date  = (datetime.date.today() + datetime.timedelta(days=delta)).strftime("%Y-%m-%d")
+    print("Choose date assignment option:")
+    print("1. Automatically assign date (10-30 days from today)")
+    print("2. Manually enter date (YYYY-MM-DD)")
+    choice = input("Choice (1-2): ").strip()
+
+    if choice == "1":
+        delta          = random.randint(10, 30)
+        assigned_date  = (datetime.date.today() + datetime.timedelta(days=delta)).strftime("%Y-%m-%d")
+    elif choice == "2":
+        assigned_date  = _ask_date("Enter date (YYYY-MM-DD): ")
+    else:
+        print("Invalid choice. Operation cancelled.")
+        return
+
     res["date"]    = assigned_date
     _save(RESERVATIONS_FILE, reservations)
     print(f"Reservation accepted! Assigned date: {assigned_date}")

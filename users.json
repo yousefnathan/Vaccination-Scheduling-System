@@ -1,1 +1,12 @@
-[]
+[
+  {
+    "id": 0,
+    "name": "Administrator",
+    "email": "admin@system.com",
+    "password": "fda7a1d320cc2f9e1ad6cc90abea09e45f6fe868753a74ce187212c52f014168",
+    "salt": "8ceb8c92d699030d3a8204c4f5894658",
+    "phone": "0000000000",
+    "national_id": "0000000000",
+    "is_admin": true
+  }
+]
